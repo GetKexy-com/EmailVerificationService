@@ -10,16 +10,14 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { randomStringGenerator } from '@nestjs/common/utils/random-string-generator.util';
+import { ConfigService } from '@nestjs/config';
 import { minutes, Throttle } from '@nestjs/throttler';
-import { FastifyRequest } from 'fastify';
 
 import { JwtAuthGuard } from '@/auth/guards/jwt.guard';
 import { BulkFilesService } from '@/bulk-files/bulk-files.service';
 import { CreateBulkFileDto } from '@/bulk-files/dto/create-bulk-file.dto';
 import { BulkFile, BulkFileStatus } from '@/bulk-files/entities/bulk-file.entity';
 import { QueueService } from '@/queue/queue.service';
-import * as process from 'node:process';
-import { ConfigService } from '@nestjs/config';
 
 @Controller('bulk-files')
 export class BulkFilesController {
