@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f4f4f4;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      background: #ffffff;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.1);
+    }
+
+    h2 {
+      color: #333;
+    }
+    hr {
+      border-style: groove;
+      border-color: #efecec;
+    }
+    p {
+      font-size: 16px;
+      color: #555;
+    }
+
+    .button {
+      display: inline-block;
+      background-color: #007BFF;
+      color: white !important;
+      padding: 12px 20px;
+      text-decoration: none;
+      border-radius: 5px;
+      font-weight: bold;
+    }
+
+    .footer {
+      margin-top: 20px;
+      font-size: 13px;
+      color: #888;
+      text-align: center;
+    }
+    .unsubscribe {
+      color: #007BFF;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <p style="margin-top: 0">Hello {{user.first_name}},</p>
+  <p>Your email verification process is complete. Below are the details:</p>
+
+  <ul>
+    <li><strong>Total Emails:</strong> {{bulkFile.total_email_count}}</li>
+    <li><strong>Valid:</strong> {{bulkFile.valid_email_count}}</li>
+    <li><strong>Catch-All:</strong> {{bulkFile.catch_all_count}}</li>
+    <li><strong>Blacklisted:</strong> {{bulkFile.spam_strap_count}}</li>
+    <li><strong>Invalid:</strong> {{bulkFile.invalid_email_count}}</li>
+    <li><strong>Role/Disposable:</strong> {{bulkFile.do_not_mail_count}}</li>
+    <li><strong>Mailbox Not Found:</strong> {{bulkFile.unknown_count}}</li>
+  </ul>
+
+  <p>A comprehensive report, along with all verification files, is attached for your reference. Additionally, individual
+    files for each email status category have been generated and are available in your LeadWrap dashboard.</p>
+
+  <p>You can download the attached report for full details.</p>
+
+  <p><a class="button" href="{{downloadLink}}">Download Report</a></p>
+
+  <p style="font-size: 14px">If you have any questions, contact us at arahim@leadwrap.com</p>
+
+  <hr>
+
+  <p class="footer">
+    You are receiving this email because you requested an email verification service.
+    If you no longer wish to receive such emails, you can <a class="unsubscribe" href="{{unsubscribeLink}}">unsubscribe here</a>.
+    <br><br>
+    Lead Wrap, Inc. <br>
+    1023, New York, United States. <br>
+    https://leadwrap.com <br>
+
+  </p>
+</div>
+</body>
+</html>
