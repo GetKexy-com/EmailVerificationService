@@ -1,7 +1,9 @@
 import { HttpException, HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import * as dns from 'dns';
 import { DataSource } from 'typeorm';
 
+import { BulkFileEmail } from '@/bulk-file-emails/entities/bulk-file-email.entity';
 import { PaginationQueryDto } from '@/common/dto/pagination-query.dto';
 import {
   CATCH_ALL_CHECK_DAY_GAP,
@@ -20,20 +22,18 @@ import {
 } from '@/common/utility/email-status-type';
 import freeEmailProviderList from '@/common/utility/free-email-provider-list';
 import { DisposableDomainsService } from '@/disposable-domains/disposable-domains.service';
-import { EmailRolesService } from '@/email-roles/email-roles.service';
-import { EmailRole } from '@/email-roles/entities/email-role.entity';
 import { CreateDomainDto } from '@/domains/dto/create-domain.dto';
 import { UpdateDomainDto } from '@/domains/dto/update-domain.dto';
 import { Domain, MXRecord } from '@/domains/entities/domain.entity';
 import { ErrorDomain } from '@/domains/entities/error_domain.entity';
 import { ProcessedEmail, RetryStatus } from '@/domains/entities/processed_email.entity';
+import { EmailRolesService } from '@/email-roles/email-roles.service';
+import { EmailRole } from '@/email-roles/entities/email-role.entity';
 import { WinstonLoggerService } from '@/logger/winston-logger.service';
-import { User } from '@/users/entities/user.entity';
 import { MailerService } from '@/mailer/mailer.service';
-import { ConfigService } from '@nestjs/config';
 import { SmtpConnectionService } from '@/smtp-connection/smtp-connection.service';
 import { TimeService } from '@/time/time.service';
-import { BulkFileEmail } from '@/bulk-file-emails/entities/bulk-file-email.entity';
+import { User } from '@/users/entities/user.entity';
 
 @Injectable()
 export class DomainService {
@@ -141,7 +141,6 @@ export class DomainService {
     return null;
   }
 
-
   async getProcessedEmail(email: string) {
     const processedEmail: ProcessedEmail = await ProcessedEmail.findOneBy({
       email_address: email,
@@ -151,7 +150,6 @@ export class DomainService {
     }
     return null;
   }
-
 
   async getGreyListedProcessedEmail(bulkFileId: number) {
     return ProcessedEmail.find({
@@ -180,10 +178,7 @@ export class DomainService {
       domain: createDomainDto.domain,
     });
     if (existingDomain) {
-      throw new HttpException(
-        `Domain ${createDomainDto.domain} already exist`,
-        HttpStatus.FOUND,
-      );
+      throw new HttpException(`Domain ${createDomainDto.domain} already exist`, HttpStatus.FOUND);
     }
     const domain = Domain.create({ ...createDomainDto });
     return domain.save();
@@ -194,10 +189,7 @@ export class DomainService {
       domain: errorDomain.domain,
     });
     if (existingDomain) {
-      if (
-        errorDomain.domain_error['status'] !==
-        existingDomain.domain_error['status']
-      ) {
+      if (errorDomain.domain_error['status'] !== existingDomain.domain_error['status']) {
         return true;
       } else {
         existingDomain.domain_error = errorDomain.domain_error;
@@ -260,10 +252,7 @@ export class DomainService {
     });
   }
 
-  async checkDomainMxRecords(
-    domain: string,
-    dbDomain: Domain,
-  ): Promise<any> {
+  async checkDomainMxRecords(domain: string, dbDomain: Domain): Promise<any> {
     return new Promise(async (resolve, reject) => {
       // Check if mx record saveBulkFile time is pass 30 days or not.
       // If yes - then revalidate mx records to make sure it is still valid
@@ -314,7 +303,6 @@ export class DomainService {
     });
   }
 
-
   checkDomainSpamDatabaseList(domain: string) {
     return new Promise((resolve, reject) => {
       const dnsbl = new DNSBL(domain);
@@ -340,8 +328,7 @@ export class DomainService {
   async isRoleBasedEmail(email) {
     return new Promise(async (resolve, reject) => {
       const localPart = email.split('@')[0].toLowerCase();
-      const isRoleBased: EmailRole =
-        await this.emailRolesService.findOne(localPart);
+      const isRoleBased: EmailRole = await this.emailRolesService.findOne(localPart);
       if (isRoleBased) {
         const error: EmailStatusType = {
           status: EmailStatus.DO_NOT_MAIL,
@@ -356,8 +343,7 @@ export class DomainService {
 
   async isDisposableDomain(domain) {
     return new Promise(async (resolve, reject) => {
-      const isDisposable =
-        await this.disposableDomainsService.findByDomain(domain);
+      const isDisposable = await this.disposableDomainsService.findByDomain(domain);
       if (isDisposable) {
         const error: EmailStatusType = {
           status: EmailStatus.DO_NOT_MAIL,
@@ -385,11 +371,14 @@ export class DomainService {
     });
   }
 
-  async bulkOutlookEmailVerification(emails: BulkFileEmail[], mxRecordHost: string, user: User, bulkFileId: number) {
-    let smtpService: SmtpConnectionService;
-    let smtpConnectionStatus: EmailStatusType;
-    smtpService = new SmtpConnectionService(this.winstonLoggerService);
-    smtpConnectionStatus = await smtpService.connect(mxRecordHost);
+  async bulkEmailVerification(
+    emails: BulkFileEmail[],
+    mxRecordHost: string,
+    user: User,
+    bulkFileId: number,
+  ) {
+    const smtpService: SmtpConnectionService = new SmtpConnectionService(this.winstonLoggerService);
+    await smtpService.connect(mxRecordHost);
     const emailStatuses: EmailValidationResponseType[] = await smtpService.verifyBulkEmail(emails);
     if (emailStatuses.length) {
       for (const emailStatus of emailStatuses) {
@@ -444,7 +433,7 @@ export class DomainService {
       await this.findErrorDomain(domain);
 
       // Query DB for existing domain check
-      let dbDomain: Domain = await this.findOne(domain);
+      const dbDomain: Domain = await this.findOne(domain);
 
       // Check if domain is one of free email providers.
       // If Yes - We SKIP,
@@ -478,10 +467,7 @@ export class DomainService {
       }
 
       // Step 7 : Get the MX records of the domain
-      const allMxRecordHost: MXRecord[] = await this.checkDomainMxRecords(
-        domain,
-        dbDomain,
-      );
+      const allMxRecordHost: MXRecord[] = await this.checkDomainMxRecords(domain, dbDomain);
 
       // Get the 0 index mxHost as it has the highest priority.
       // We sort the MX records by their priority in ASC order
@@ -520,7 +506,12 @@ export class DomainService {
       // If - User enabled verify+ and smtp response
       // is a 'timeout' then we must trigger Verify+
       if (smtpConnectionStatus.reason === EmailReason.SMTP_TIMEOUT) {
-        emailStatus = await this.__processVerifyPlus(email, user, smtpConnectionStatus, emailStatus);
+        emailStatus = await this.__processVerifyPlus(
+          email,
+          user,
+          smtpConnectionStatus,
+          emailStatus,
+        );
       } else {
         const smtpResponse: EmailStatusType = await smtpService.verifyEmail(email);
         emailStatus = await this.__processVerifyPlus(email, user, smtpResponse, emailStatus);
@@ -543,9 +534,7 @@ export class DomainService {
     } catch (error) {
       emailStatus.email_status = error['status'];
       emailStatus.email_sub_status = error['reason'];
-      emailStatus.free_email = freeEmailProviderList.includes(
-        emailStatus.domain,
-      );
+      emailStatus.free_email = freeEmailProviderList.includes(emailStatus.domain);
       await this.saveProcessedErrorEmail(emailStatus, error, email, user, bulkFileId);
 
       return emailStatus;
@@ -595,7 +584,7 @@ export class DomainService {
 
   async saveProcessedErrorEmail(
     emailStatus: EmailValidationResponseType,
-    error: { reason: EmailReason; },
+    error: { reason: EmailReason },
     email: string,
     user: User,
     bulkFileId: number,
@@ -614,10 +603,7 @@ export class DomainService {
         EmailReason.IP_BLOCKED,
         EmailReason.SMTP_TIMEOUT,
       ];
-      if (
-        emailStatus.free_email ||
-        (error.reason && skipReasons.includes(error.reason))
-      ) {
+      if (emailStatus.free_email || (error.reason && skipReasons.includes(error.reason))) {
         return emailStatus;
       }
 

@@ -1,6 +1,10 @@
 import { Injectable } from '@nestjs/common';
+import { randomStringGenerator } from '@nestjs/common/utils/random-string-generator.util';
 import * as net from 'net';
 import * as tls from 'tls';
+
+import { BulkFileEmail } from '@/bulk-file-emails/entities/bulk-file-email.entity';
+import { SMTP_RESPONSE_MAX_DELAY } from '@/common/utility/constant';
 import {
   EmailReason,
   EmailStatus,
@@ -9,12 +13,9 @@ import {
   ipBlockedStringsArray,
   SMTPResponseCode,
 } from '@/common/utility/email-status-type';
-import { WinstonLoggerService } from '@/logger/winston-logger.service';
-import { randomStringGenerator } from '@nestjs/common/utils/random-string-generator.util';
-import { SMTP_RESPONSE_MAX_DELAY } from '@/common/utility/constant';
 import freeEmailProviderList from '@/common/utility/free-email-provider-list';
 import { RetryStatus } from '@/domains/entities/processed_email.entity';
-import { BulkFileEmail } from '@/bulk-file-emails/entities/bulk-file-email.entity';
+import { WinstonLoggerService } from '@/logger/winston-logger.service';
 
 @Injectable()
 export class SmtpConnectionService {
@@ -27,9 +28,7 @@ export class SmtpConnectionService {
   private readonly tlsMinVersion: any = 'TLSv1.2';
   private isSmtpSlow: boolean = false;
 
-  constructor(
-    private winstonLoggerService: WinstonLoggerService,
-  ) {
+  constructor(private winstonLoggerService: WinstonLoggerService) {
   }
 
   async connect(mxHost: string): Promise<any> {
@@ -115,7 +114,6 @@ export class SmtpConnectionService {
             this.sendCommand(`QUIT`);
             return;
           });
-
         } catch (e) {
           // If "EHLO" command throw exception then it is caught here
           const emailStatus: EmailStatusType = { status: undefined, reason: undefined };
@@ -148,7 +146,6 @@ export class SmtpConnectionService {
         return;
       });
 
-
       this.socket.once('close', () => {
         console.log('closed');
         if (!socketDataFired) {
@@ -178,7 +175,7 @@ export class SmtpConnectionService {
     // this.socket.removeAllListeners();
     let timeout: NodeJS.Timeout;
     // Track command start time to detect calculate server response time.
-    let startTime = Date.now();
+    const startTime = Date.now();
 
     return new Promise((resolve, reject) => {
       try {
@@ -278,8 +275,14 @@ export class SmtpConnectionService {
         // have catch all.
         if (!freeEmailProviderList.includes(domain)) {
           const catchAllEmail = `${randomStringGenerator()}${Date.now()}@${domain}`;
-          const responseCatchAllRcptTo = await this.sendCommand(`RCPT TO:<${catchAllEmail}>`, catchAllEmail);
-          const catchAllEmailStatus: EmailStatusType = this.parseSmtpResponseData(responseCatchAllRcptTo, catchAllEmail);
+          const responseCatchAllRcptTo = await this.sendCommand(
+            `RCPT TO:<${catchAllEmail}>`,
+            catchAllEmail,
+          );
+          const catchAllEmailStatus: EmailStatusType = this.parseSmtpResponseData(
+            responseCatchAllRcptTo,
+            catchAllEmail,
+          );
           if (catchAllEmailStatus.status === EmailStatus.VALID) {
             const error: EmailStatusType = {
               status: EmailStatus.CATCH_ALL,
@@ -325,13 +328,16 @@ export class SmtpConnectionService {
     });
   }
 
-
   async verifyBulkEmail(bulkFileEmails: BulkFileEmail[]): Promise<EmailValidationResponseType[]> {
     const mailFrom = 'tanimpathan98@gmail.com';
-    let emailStatuses: EmailValidationResponseType[] = [];
+    const emailStatuses: EmailValidationResponseType[] = [];
 
-    await this.sendCommand(`EHLO ${this.host}`);
-    await this.sendCommand(`MAIL FROM:<${mailFrom}>`);
+    try {
+      await this.sendCommand(`EHLO ${this.host}`);
+      await this.sendCommand(`MAIL FROM:<${mailFrom}>`);
+    } catch (e) {
+      return [];
+    }
     // Check for Catch-All email for business domains only.
     // Known Email Providers like gmail.com, yahoo.com, outlook.com do not
     // have catch all.
@@ -392,10 +398,7 @@ export class SmtpConnectionService {
     return emailStatuses;
   }
 
-  public parseSmtpResponseData(
-    data: string,
-    email: string,
-  ): EmailStatusType {
+  public parseSmtpResponseData(data: string, email: string): EmailStatusType {
     if (data.includes(SMTPResponseCode.TWO_50.smtp_code.toString())) {
       return SMTPResponseCode.TWO_50;
     } else if (data.includes(SMTPResponseCode.TWO_51.smtp_code.toString())) {
@@ -408,7 +411,7 @@ export class SmtpConnectionService {
       data.includes(SMTPResponseCode.FIVE_51.smtp_code.toString()) ||
       data.includes(SMTPResponseCode.FIVE_00.smtp_code.toString())
     ) {
-      let error: EmailStatusType = { reason: undefined, status: undefined };
+      const error: EmailStatusType = { reason: undefined, status: undefined };
       this.winstonLoggerService.error(`(500,556,505,551,550) - ${email}`, data);
 
       // Check if "data" has any of the strings from 'ipBlockedStringsArray'
@@ -434,7 +437,7 @@ export class SmtpConnectionService {
     } else if (data.includes(SMTPResponseCode.FIVE_54.smtp_code.toString())) {
       return SMTPResponseCode.FIVE_54;
     } else {
-      let error: EmailStatusType = { reason: undefined, status: undefined };
+      const error: EmailStatusType = { reason: undefined, status: undefined };
       // When no other condition is true, handle it for all other codes
       // Response code starts with "4" - Temporary error, and we should retry later
       // Response code starts with "5" - Permanent error and must not retry
@@ -462,6 +465,5 @@ export class SmtpConnectionService {
         }
       }
     }
-
   }
 }

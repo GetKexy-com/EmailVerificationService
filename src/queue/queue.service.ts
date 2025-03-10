@@ -1,6 +1,10 @@
-import { Injectable } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
+import { Injectable } from '@nestjs/common';
+import Bottleneck from 'bottleneck';
 import { JobOptions, Queue } from 'bull';
+
+import { BulkFileEmailsService } from '@/bulk-file-emails/bulk-file-emails.service';
+import { BulkFile, BulkFileStatus } from '@/bulk-files/entities/bulk-file.entity';
 import {
   GREY_LIST_MINUTE_GAP,
   PROCESS_BULK_FILE_QUEUE,
@@ -8,7 +12,6 @@ import {
   PROCESS_GREY_LIST_QUEUE,
   QUEUE,
 } from '@/common/utility/constant';
-import { MailerService } from '@/mailer/mailer.service';
 import {
   EmailReason,
   EmailStatus,
@@ -16,13 +19,11 @@ import {
   EmailValidationResponseType,
   SendMailOptions,
 } from '@/common/utility/email-status-type';
-import Bottleneck from 'bottleneck';
 import { Domain, MXRecord } from '@/domains/entities/domain.entity';
 import { DomainService } from '@/domains/services/domain.service';
 import { WinstonLoggerService } from '@/logger/winston-logger.service';
+import { MailerService } from '@/mailer/mailer.service';
 import { SmtpConnectionService } from '@/smtp-connection/smtp-connection.service';
-import { BulkFile, BulkFileStatus } from '@/bulk-files/entities/bulk-file.entity';
-import { BulkFileEmailsService } from '@/bulk-file-emails/bulk-file-emails.service';
 
 @Injectable()
 export class QueueService {
@@ -33,8 +34,7 @@ export class QueueService {
     private readonly bulkFileEmailsService: BulkFileEmailsService,
     private readonly winstonLoggerService: WinstonLoggerService,
     @InjectQueue(QUEUE) private readonly queue: Queue,
-  ) {
-  }
+  ) {}
 
   // Bottleneck for rate limiting (CommonJS compatible)
   public limiter = new Bottleneck({
@@ -42,8 +42,10 @@ export class QueueService {
     minTime: 300, // 200ms delay between requests (adjustable)
   });
 
-
-  async addGreyListEmailToQueue(emailSmtpResponses: EmailValidationResponseType[], bulkFile: BulkFile) {
+  async addGreyListEmailToQueue(
+    emailSmtpResponses: EmailValidationResponseType[],
+    bulkFile: BulkFile,
+  ) {
     const jobOptions: JobOptions = {
       attempts: 1, // Retry 3 times if failed
       delay: GREY_LIST_MINUTE_GAP, // delay for 15 minutes
@@ -87,37 +89,45 @@ export class QueueService {
     const bulkFile: BulkFile = emailQueueData.bulkFile;
     console.log(emailSmtpResponses);
 
-    const validationPromises: Promise<any>[] = emailSmtpResponses.map((greyEmailRedisResponse: EmailValidationResponseType) => limiter.schedule(async () => {
-      console.log(`Gray Verify ${greyEmailRedisResponse.email_address} started`);
-      const domain: Domain = await this.domainService.findOne(greyEmailRedisResponse.domain);
-      let newEmailStatus: EmailStatusType;
-      try {
-        const allMxRecordHost: MXRecord[] = JSON.parse(domain.mx_record_hosts);
-        const index = Math.floor(Math.random() * allMxRecordHost.length);
-        const mxRecordHost = allMxRecordHost[index].exchange;
-        // Here we are not creating new instance of 'SmtpConnectionService' because,
-        // We run only 1 connection at a time through 'Bottleneck'. So we can reuse
-        // the same socket without crossing the max socket connection limit which is 10
-        await this.smtpService.connect(mxRecordHost);
-        newEmailStatus = await this.smtpService.verifyEmail(greyEmailRedisResponse.email_address);
-      } catch (e) {
-        newEmailStatus = e;
-        this.winstonLoggerService.error('Gray List Error', e);
-      }
-      // If email status is still GREY_LISTED then mark it invalid.
-      if (newEmailStatus.reason === EmailReason.GREY_LISTED) {
-        greyEmailRedisResponse.email_status = EmailStatus.INVALID;
-        greyEmailRedisResponse.email_sub_status = EmailReason.MAILBOX_NOT_FOUND;
-      } else {
-        greyEmailRedisResponse.email_status = newEmailStatus.status;
-        greyEmailRedisResponse.email_sub_status = newEmailStatus.reason;
-      }
-      console.log({ emailStatus: newEmailStatus });
-      // greyEmailRedisResponse.retry = RetryStatus.COMPLETE;
-      await this.domainService.updateProcessedEmailByEmail(greyEmailRedisResponse.email_address, greyEmailRedisResponse);
+    const validationPromises: Promise<any>[] = emailSmtpResponses.map(
+      (greyEmailRedisResponse: EmailValidationResponseType) =>
+        limiter.schedule(async () => {
+          console.log(`Gray Verify ${greyEmailRedisResponse.email_address} started`);
+          const domain: Domain = await this.domainService.findOne(greyEmailRedisResponse.domain);
+          let newEmailStatus: EmailStatusType;
+          try {
+            const allMxRecordHost: MXRecord[] = JSON.parse(domain.mx_record_hosts);
+            const index = Math.floor(Math.random() * allMxRecordHost.length);
+            const mxRecordHost = allMxRecordHost[0].exchange;
+            // Here we are not creating new instance of 'SmtpConnectionService' because,
+            // We run only 1 connection at a time through 'Bottleneck'. So we can reuse
+            // the same socket without crossing the max socket connection limit which is 10
+            await this.smtpService.connect(mxRecordHost);
+            newEmailStatus = await this.smtpService.verifyEmail(
+              greyEmailRedisResponse.email_address,
+            );
+          } catch (e) {
+            newEmailStatus = e;
+            this.winstonLoggerService.error('Gray List Error', e);
+          }
+          // If email status is still GREY_LISTED then mark it invalid.
+          if (newEmailStatus.reason === EmailReason.GREY_LISTED) {
+            greyEmailRedisResponse.email_status = EmailStatus.INVALID;
+            greyEmailRedisResponse.email_sub_status = EmailReason.MAILBOX_NOT_FOUND;
+          } else {
+            greyEmailRedisResponse.email_status = newEmailStatus.status;
+            greyEmailRedisResponse.email_sub_status = newEmailStatus.reason;
+          }
+          console.log({ emailStatus: newEmailStatus });
+          // greyEmailRedisResponse.retry = RetryStatus.COMPLETE;
+          await this.domainService.updateProcessedEmailByEmail(
+            greyEmailRedisResponse.email_address,
+            greyEmailRedisResponse,
+          );
 
-      return newEmailStatus;
-    }));
+          return newEmailStatus;
+        }),
+    );
 
     // Wait for all validations to complete
     await Promise.allSettled(validationPromises);
@@ -132,5 +142,4 @@ export class QueueService {
   async saveBulkFileEmails(bulkFile: BulkFile) {
     await this.bulkFileEmailsService.saveBulkFileEmails(bulkFile);
   }
-
 }

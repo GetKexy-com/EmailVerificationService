@@ -1,32 +1,31 @@
 import { Injectable } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import Bottleneck from 'bottleneck';
+import { Attachment } from 'nodemailer/lib/mailer';
+import * as path from 'path';
+import * as process from 'process';
 
+import { BulkFileEmailsService } from '@/bulk-file-emails/bulk-file-emails.service';
+import { BulkFileEmail } from '@/bulk-file-emails/entities/bulk-file-email.entity';
 import { BulkFilesService } from '@/bulk-files/bulk-files.service';
 import { UpdateBulkFileDto } from '@/bulk-files/dto/update-bulk-file.dto';
 import { BulkFile, BulkFileStatus } from '@/bulk-files/entities/bulk-file.entity';
+import { DEV, MicrosoftDomains } from '@/common/utility/constant';
 import {
   EmailReason,
   EmailStatus,
   EmailValidationResponseType,
   SendMailOptions,
 } from '@/common/utility/email-status-type';
+import { ProcessedEmail } from '@/domains/entities/processed_email.entity';
 import { DomainService } from '@/domains/services/domain.service';
 import { WinstonLoggerService } from '@/logger/winston-logger.service';
-import Bottleneck from 'bottleneck';
-import { UsersService } from '@/users/users.service';
-import { User } from '@/users/entities/user.entity';
-import { ProcessedEmail } from '@/domains/entities/processed_email.entity';
 import { QueueService } from '@/queue/queue.service';
-import { Attachment } from 'nodemailer/lib/mailer';
-import { BulkFileEmailsService } from '@/bulk-file-emails/bulk-file-emails.service';
-import { BulkFileEmail } from '@/bulk-file-emails/entities/bulk-file-email.entity';
-import * as path from 'path';
-import { DEV, MicrosoftDomains } from '@/common/utility/constant';
-import * as process from 'process';
+import { User } from '@/users/entities/user.entity';
+import { UsersService } from '@/users/users.service';
 
 @Injectable()
 export class SchedulerService {
-
   constructor(
     private bulkFilesService: BulkFilesService,
     private bulkFileEmailsService: BulkFileEmailsService,
@@ -34,8 +33,7 @@ export class SchedulerService {
     private userService: UsersService,
     private queueService: QueueService,
     private winstonLoggerService: WinstonLoggerService,
-  ) {
-  }
+  ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
   public async runFileEmailValidation() {
@@ -47,7 +45,10 @@ export class SchedulerService {
     const bulkFile: BulkFile = pendingFiles[0];
     const user: User = await this.userService.findOneById(bulkFile.user_id);
     if (!user) {
-      this.winstonLoggerService.error('runFileEmailValidation()', `No user found for user_id: ${bulkFile.user_id}`);
+      this.winstonLoggerService.error(
+        'runFileEmailValidation()',
+        `No user found for user_id: ${bulkFile.user_id}`,
+      );
 
       return;
     }
@@ -55,21 +56,14 @@ export class SchedulerService {
       const processingStatus: UpdateBulkFileDto = {
         file_status: BulkFileStatus.PROCESSING,
       };
-      await this.bulkFilesService.updateBulkFile(
-        bulkFile.id,
-        processingStatus,
-      );
+      await this.bulkFilesService.updateBulkFile(bulkFile.id, processingStatus);
 
       await this.__bulkValidate(bulkFile, user);
 
       const bulkFileUpdateData: UpdateBulkFileDto = {
         file_status: BulkFileStatus.READY_FOR_GREY_LIST,
       };
-      await this.bulkFilesService.updateBulkFile(
-        bulkFile.id,
-        bulkFileUpdateData,
-      );
-
+      await this.bulkFilesService.updateBulkFile(bulkFile.id, bulkFileUpdateData);
     } catch (e) {
       this.winstonLoggerService.error('Bulk File Error', e.trace);
       console.log(e);
@@ -85,15 +79,22 @@ export class SchedulerService {
     const bulkFile: BulkFile = greyListFile[0];
     const user: User = await this.userService.findOneById(bulkFile.user_id);
     if (!user) {
-      this.winstonLoggerService.error('processGreyListBulkFile()', `No user found for user_id: ${bulkFile.user_id}`);
+      this.winstonLoggerService.error(
+        'processGreyListBulkFile()',
+        `No user found for user_id: ${bulkFile.user_id}`,
+      );
 
       return;
     }
 
-    const bulkFileEmails: BulkFileEmail[] = await this.bulkFileEmailsService.findBulkFileEmails(bulkFile.id);
+    const bulkFileEmails: BulkFileEmail[] = await this.bulkFileEmailsService.findBulkFileEmails(
+      bulkFile.id,
+    );
     const greyListEmails: EmailValidationResponseType[] = [];
     for (const bulkFileEmail of bulkFileEmails) {
-      const email: ProcessedEmail = await this.domainService.getProcessedEmail(bulkFileEmail.email_address);
+      const email: ProcessedEmail = await this.domainService.getProcessedEmail(
+        bulkFileEmail.email_address,
+      );
 
       if (email && email.email_sub_status && email.email_sub_status === EmailReason.GREY_LISTED) {
         greyListEmails.push(email);
@@ -105,13 +106,11 @@ export class SchedulerService {
     }
 
     const bulkFileUpdateData: UpdateBulkFileDto = {
-      file_status: greyListEmails.length ? BulkFileStatus.GREY_LIST_CHECK_PROGRESS : BulkFileStatus.GREY_LIST_CHECK_DONE,
+      file_status: greyListEmails.length
+        ? BulkFileStatus.GREY_LIST_CHECK_PROGRESS
+        : BulkFileStatus.GREY_LIST_CHECK_DONE,
     };
-    await this.bulkFilesService.updateBulkFile(
-      bulkFile.id,
-      bulkFileUpdateData,
-    );
-
+    await this.bulkFilesService.updateBulkFile(bulkFile.id, bulkFileUpdateData);
   }
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -123,7 +122,10 @@ export class SchedulerService {
     const bulkFile: BulkFile = greyListFile[0];
     const user: User = await this.userService.findOneById(bulkFile.user_id);
     if (!user) {
-      this.winstonLoggerService.error('runGrayListEmailValidation()', `No user found for user_id: ${bulkFile.user_id}`);
+      this.winstonLoggerService.error(
+        'runGrayListEmailValidation()',
+        `No user found for user_id: ${bulkFile.user_id}`,
+      );
 
       return;
     }
@@ -142,7 +144,7 @@ export class SchedulerService {
       spam_trap_count,
     } = await this.__generateBulkFileResultCsv(bulkFile.id, folderName);
 
-    let completeStatus = {
+    const completeStatus = {
       file_status: BulkFileStatus.COMPLETE,
       validation_file_path: csvSavePath,
       valid_email_count,
@@ -153,10 +155,7 @@ export class SchedulerService {
       spam_trap_count,
       updated_at: new Date(),
     };
-    await this.bulkFilesService.updateBulkFile(
-      bulkFile.id,
-      completeStatus,
-    );
+    await this.bulkFilesService.updateBulkFile(bulkFile.id, completeStatus);
 
     await this.__sendEmailNotification(user, bulkFile.id);
   }
@@ -168,15 +167,16 @@ export class SchedulerService {
     return this.__getValidationsByTypes(results);
   }
 
-
   private async __sendEmailNotification(user: User, bulkFileId: number) {
     const bulkFile: BulkFile = await this.bulkFilesService.getBulkFile(bulkFileId);
     const to = `${user.first_name} ${user.last_name} <${user.email_address}>`;
     const attachments: Attachment[] = [];
     // Get all csv files from the 'csvSavePath to send as email attachment
-    const csvFiles = await this.bulkFilesService.__getAllFilesInFolder(bulkFile.validation_file_path);
+    const csvFiles = await this.bulkFilesService.__getAllFilesInFolder(
+      bulkFile.validation_file_path,
+    );
     if (csvFiles.length) {
-      csvFiles.forEach(file => {
+      csvFiles.forEach((file) => {
         attachments.push({
           path: file,
         });
@@ -194,12 +194,15 @@ export class SchedulerService {
       template: 'email_verification_complete',
       context: emailDynamicData,
       attachments,
-      bcc: ['arahimdu50@gmail.com']
+      bcc: ['arahimdu50@gmail.com'],
     };
     await this.queueService.addEmailToQueue(emailData);
   }
 
-  private async __saveValidationResultsInCsv(results: EmailValidationResponseType[], folderName: string) {
+  private async __saveValidationResultsInCsv(
+    results: EmailValidationResponseType[],
+    folderName: string,
+  ) {
     const fileWithStatusTypes = {
       [EmailReason.ROLE_BASED]: [],
       [EmailReason.UNVERIFIABLE_EMAIL]: [],
@@ -247,19 +250,13 @@ export class SchedulerService {
       const fileName = folderName + '/' + fileType + '.csv';
       const csvData: [] = fileWithStatusTypes[fileType];
       if (csvData.length) {
-        await this.bulkFilesService.generateCsv(
-          csvData,
-          fileName,
-        );
+        await this.bulkFilesService.generateCsv(csvData, fileName);
         console.log(`${fileName} created`);
       }
     }
 
     // All data in one file.
-    await this.bulkFilesService.generateCsv(
-      results,
-      folderName + '/combined.csv',
-    );
+    await this.bulkFilesService.generateCsv(results, folderName + '/combined.csv');
     console.log(`combined.csv created`);
   }
 
@@ -270,7 +267,6 @@ export class SchedulerService {
     let invalid_email_count = 0;
     let do_not_mail_count = 0;
     let unknown_count = 0;
-
 
     results.forEach((email: EmailValidationResponseType) => {
       if (email.email_status === EmailStatus.VALID) {
@@ -286,9 +282,12 @@ export class SchedulerService {
         invalid_email_count++;
       } else if (
         // Count 'IP_BLOCKED', 'UNVERIFIABLE_EMAIL' & 'SMTP_TIMEOUT' as unknown to report to user properly.
-        (email.email_status === EmailStatus.UNKNOWN && email.email_sub_status === EmailReason.UNVERIFIABLE_EMAIL) ||
-        (email.email_status === EmailStatus.UNKNOWN && email.email_sub_status === EmailReason.SMTP_TIMEOUT) ||
-        (email.email_status === EmailStatus.SERVICE_UNAVAILABLE && email.email_sub_status === EmailReason.IP_BLOCKED)
+        (email.email_status === EmailStatus.UNKNOWN &&
+          email.email_sub_status === EmailReason.UNVERIFIABLE_EMAIL) ||
+        (email.email_status === EmailStatus.UNKNOWN &&
+          email.email_sub_status === EmailReason.SMTP_TIMEOUT) ||
+        (email.email_status === EmailStatus.SERVICE_UNAVAILABLE &&
+          email.email_sub_status === EmailReason.IP_BLOCKED)
       ) {
         unknown_count++;
       } else if (email.email_status === EmailStatus.DO_NOT_MAIL) {
@@ -306,21 +305,28 @@ export class SchedulerService {
     };
   }
 
-  private async __bulkValidate(bulkFile: BulkFile, user: User): Promise<EmailValidationResponseType[]> {
+  private async __bulkValidate(
+    bulkFile: BulkFile,
+    user: User,
+  ): Promise<EmailValidationResponseType[]> {
     if (!bulkFile.file_path) {
       throw new Error('No file path provided');
     }
 
-    let batchSize = 10;
-    let delayBetweenBatches = 10 * 1000;
+    let batchSize = 50;
+    let delayBetweenBatches = 6 * 1000;
     let limiter = new Bottleneck({
-      maxConcurrent: 2, // Adjust based on your testing
+      maxConcurrent: 1, // Adjust based on your testing
       minTime: 300, // 300ms delay between requests (adjustable)
     });
     const results: EmailValidationResponseType[] = [];
 
     try {
-      const bulkFileEmails: BulkFileEmail[] = await this.bulkFileEmailsService.findBulkFileEmails(bulkFile.id);
+      const bulkFileEmails: BulkFileEmail[] = await this.bulkFileEmailsService.findBulkFileEmails(
+        bulkFile.id,
+      );
+      const googleEmails: BulkFileEmail[] = [];
+      const googleMxRecord = 'aspmx.l.google.com';
       const hotmailEmails: BulkFileEmail[] = [];
       const hotmailMxRecord = 'hotmail-com.olc.protection.outlook.com';
       const liveEmails: BulkFileEmail[] = [];
@@ -330,10 +336,9 @@ export class SchedulerService {
       const outlookEmails: BulkFileEmail[] = [];
       const outlookMxRecord = 'outlook-com.olc.protection.outlook.com';
       const outlookBusinessDomainEmails: BulkFileEmail[] = [];
-      const nonOutlookEmails: BulkFileEmail[] = [];
+      const otherEmails: BulkFileEmail[] = [];
       for (const bulkFileEmail of bulkFileEmails) {
         const [account, domain] = bulkFileEmail.email_address.split('@');
-        console.log({ domain });
         let mxRecords = [];
         try {
           mxRecords = await this.domainService.checkDomainMxRecords(domain, null);
@@ -358,68 +363,122 @@ export class SchedulerService {
           } else {
             outlookBusinessDomainEmails.push(bulkFileEmail);
           }
+        } else if (mxRecords[0].exchange.includes(googleMxRecord)) {
+          googleEmails.push(bulkFileEmail);
         } else {
-          nonOutlookEmails.push(bulkFileEmail);
+          otherEmails.push(bulkFileEmail);
         }
       }
 
-     /* const hotmailEmailResults: EmailValidationResponseType[] = await this.__processOutlookBatch(
-        batchSize, hotmailEmails, delayBetweenBatches, hotmailMxRecord, user, bulkFile,
-      );
+      const hotmailEmailResults: EmailValidationResponseType[] =
+        await this.__processMultipleRCPTBatch(
+          batchSize,
+          hotmailEmails,
+          delayBetweenBatches,
+          hotmailMxRecord,
+          user,
+          bulkFile,
+        );
       if (hotmailEmailResults.length) {
         results.push(...hotmailEmailResults);
       }
 
-      const liveEmailResults: EmailValidationResponseType[] = await this.__processOutlookBatch(
-        batchSize, liveEmails, delayBetweenBatches, liveMxRecord, user, bulkFile,
+      const liveEmailResults: EmailValidationResponseType[] = await this.__processMultipleRCPTBatch(
+        batchSize,
+        liveEmails,
+        delayBetweenBatches,
+        liveMxRecord,
+        user,
+        bulkFile,
       );
       if (liveEmailResults.length) {
         results.push(...liveEmailResults);
       }
 
-      const outlookEmailResults: EmailValidationResponseType[] = await this.__processOutlookBatch(
-        batchSize, outlookEmails, delayBetweenBatches, outlookMxRecord, user, bulkFile,
-      );
+      const outlookEmailResults: EmailValidationResponseType[] =
+        await this.__processMultipleRCPTBatch(
+          batchSize,
+          outlookEmails,
+          delayBetweenBatches,
+          outlookMxRecord,
+          user,
+          bulkFile,
+        );
       if (outlookEmailResults.length) {
         results.push(...outlookEmailResults);
       }
 
-      const msnEmailResults: EmailValidationResponseType[] = await this.__processOutlookBatch(
-        batchSize, msnEmails, delayBetweenBatches, msnMxRecord, user, bulkFile,
+      const msnEmailResults: EmailValidationResponseType[] = await this.__processMultipleRCPTBatch(
+        batchSize,
+        msnEmails,
+        delayBetweenBatches,
+        msnMxRecord,
+        user,
+        bulkFile,
       );
       if (msnEmailResults.length) {
         results.push(...msnEmailResults);
-      }*/
+      }
+
+      batchSize = 10;
+      limiter = new Bottleneck({
+        maxConcurrent: 1,
+        minTime: 300,
+      });
+      delayBetweenBatches = 10 * 1000;
+      const googleEmailResults: EmailValidationResponseType[] =
+        await this.__processMultipleRCPTBatch(
+          batchSize,
+          googleEmails,
+          delayBetweenBatches,
+          googleMxRecord,
+          user,
+          bulkFile,
+        );
+      if (googleEmailResults.length) {
+        results.push(...googleEmailResults);
+      }
 
       // Split emails into batches
-      const nonOutlookEmailBatches = this.__createBatchOfSize(batchSize, nonOutlookEmails);
-      // For Outlook, each batch should have only 1 email.
-/*
-      batchSize = 1;
-      const outlookBusinessEmailBatches = this.__createBatchOfSize(batchSize, outlookBusinessDomainEmails);
-*/
-
+      const nonOutlookEmailBatches = this.__createBatchOfSize(batchSize, otherEmails);
       // Process each batch sequentially
       for (const batch of nonOutlookEmailBatches) {
-        const result: EmailValidationResponseType[] = await this.__processBatchValidation(batch, limiter, user, bulkFile);
+        const result: EmailValidationResponseType[] = await this.__processSingleRCPTBatchValidation(
+          batch,
+          limiter,
+          user,
+          bulkFile,
+        );
         if (result.length) {
           results.push(...result);
         }
         await this.__delay(delayBetweenBatches);
       }
+
       // For Outlook mail server we slow the limiter to only 1 per concurrency
       // and delay between batches is 2 sec as batch size is 1 email
-      /*limiter = new Bottleneck({
+      limiter = new Bottleneck({
         maxConcurrent: 1,
       });
-      delayBetweenBatches = 2 * 1000;
+      delayBetweenBatches = 12 * 1000; // So it is 5 per min
+      // For Outlook, each batch should have only 1 email.
+      batchSize = 1;
+      const outlookBusinessEmailBatches = this.__createBatchOfSize(
+        batchSize,
+        outlookBusinessDomainEmails,
+      );
       for (const batch of outlookBusinessEmailBatches) {
-        const result: EmailValidationResponseType[] = await this.__processBatchValidation(batch, limiter, user, bulkFile);
+        const result: EmailValidationResponseType[] = await this.__processSingleRCPTBatchValidation(
+          batch,
+          limiter,
+          user,
+          bulkFile,
+        );
         if (result.length) {
           results.push(...result);
         }
         await this.__delay(delayBetweenBatches);
-      }*/
+      }
 
       console.log('✅ All batches processed.');
       return results;
@@ -429,7 +488,7 @@ export class SchedulerService {
     }
   }
 
-  private async __processOutlookBatch(
+  private async __processMultipleRCPTBatch(
     batchSize: number,
     emails: BulkFileEmail[],
     delayBetweenBatches: number,
@@ -445,7 +504,8 @@ export class SchedulerService {
     const emailBatches = this.__createBatchOfSize(batchSize, emails);
     // Process each batch sequentially
     for (const batch of emailBatches) {
-      const hotmailResponse: EmailValidationResponseType[] = await this.domainService.bulkOutlookEmailVerification(batch, mxRecordHost, user, bulkFile.id);
+      const hotmailResponse: EmailValidationResponseType[] =
+        await this.domainService.bulkEmailVerification(batch, mxRecordHost, user, bulkFile.id);
       if (hotmailResponse.length) {
         results.push(...hotmailResponse);
       }
@@ -455,7 +515,7 @@ export class SchedulerService {
   }
 
   private async __delay(delay: number) {
-    await new Promise(resolve => setTimeout(resolve, delay));
+    await new Promise((resolve) => setTimeout(resolve, delay));
   }
 
   private __createBatchOfSize(size: number, emails: BulkFileEmail[]) {
@@ -467,17 +527,19 @@ export class SchedulerService {
     return batch;
   }
 
-  private async __processBatchValidation(batch: BulkFileEmail[], limiter, user, bulkFile): Promise<EmailValidationResponseType[]> {
+  private async __processSingleRCPTBatchValidation(
+    batch: BulkFileEmail[],
+    limiter,
+    user,
+    bulkFile,
+  ): Promise<EmailValidationResponseType[]> {
     const results: EmailValidationResponseType[] = [];
     const batchPromises = batch.map((bulkFileEmail) =>
       limiter.schedule(async () => {
         try {
           console.log(`Validation started: ${bulkFileEmail.email_address}`);
-          const validationResponse: EmailValidationResponseType = await this.domainService.smtpValidation(
-            bulkFileEmail.email_address,
-            user,
-            bulkFile.id,
-          );
+          const validationResponse: EmailValidationResponseType =
+            await this.domainService.smtpValidation(bulkFileEmail.email_address, user, bulkFile.id);
           console.log(`Validation complete: ${validationResponse.email_address}`);
           return validationResponse;
         } catch (error) {
@@ -491,19 +553,18 @@ export class SchedulerService {
     const batchResults = await Promise.allSettled(batchPromises);
     results.push(
       ...batchResults
-        .filter(result => result.status === 'fulfilled' && result.value !== null)
-        .map(result => (result as PromiseFulfilledResult<any>).value),
+        .filter((result) => result.status === 'fulfilled' && result.value !== null)
+        .map((result) => (result as PromiseFulfilledResult<any>).value),
     );
 
     return results;
   }
 
-
   private async __oldBulkValidate(bulkFile: BulkFile, user: User): Promise<any[]> {
     if (!bulkFile.file_path) {
       throw new Error('No file path provided');
     }
-    let csvHeaders = [];
+    const csvHeaders = [];
     // Bottleneck for rate limiting (CommonJS compatible)
     const limiter = new Bottleneck({
       maxConcurrent: 2, // Adjust based on your testing
@@ -511,7 +572,9 @@ export class SchedulerService {
     });
 
     try {
-      const bulkFileEmails: BulkFileEmail[] = await this.bulkFileEmailsService.findBulkFileEmails(bulkFile.id);
+      const bulkFileEmails: BulkFileEmail[] = await this.bulkFileEmailsService.findBulkFileEmails(
+        bulkFile.id,
+      );
       // const records = await this.bulkFilesService.readCsvFile(bulkFile.file_path);
       // console.log({ records });
 
@@ -538,15 +601,12 @@ export class SchedulerService {
       // }
       // return results;
 
-
       // Validate emails in parallel
-      const validationPromises: Promise<any>[] = bulkFileEmails.map((bulkFileEmail) => limiter.schedule(async () => {
+      const validationPromises: Promise<any>[] = bulkFileEmails.map((bulkFileEmail) =>
+        limiter.schedule(async () => {
           console.log(`Validation started: ${bulkFileEmail.email_address}`);
-          const validationResponse: EmailValidationResponseType = await this.domainService.smtpValidation(
-            bulkFileEmail.email_address,
-            user,
-            bulkFile.id,
-          );
+          const validationResponse: EmailValidationResponseType =
+            await this.domainService.smtpValidation(bulkFileEmail.email_address, user, bulkFile.id);
           console.log(`Complete ${validationResponse.email_address}`);
           return validationResponse;
         }),
@@ -554,8 +614,8 @@ export class SchedulerService {
       // Wait for all validations to complete
       const results = await Promise.allSettled(validationPromises);
       return results
-        .filter(result => result.status === 'fulfilled')
-        .map(result => (result as PromiseFulfilledResult<any>).value);
+        .filter((result) => result.status === 'fulfilled')
+        .map((result) => (result as PromiseFulfilledResult<any>).value);
     } catch (err) {
       console.error('Error during bulk validation:', err);
       throw err;
@@ -567,7 +627,9 @@ export class SchedulerService {
       const records = await this.bulkFilesService.readCsvFile(csvPath);
 
       for (let record of records) {
-        const processedEmail: ProcessedEmail = await this.domainService.getProcessedEmail(record.Email);
+        const processedEmail: ProcessedEmail = await this.domainService.getProcessedEmail(
+          record.Email,
+        );
         if (!processedEmail) {
           continue;
         }
@@ -586,5 +648,4 @@ export class SchedulerService {
       throw err;
     }
   }
-
 }
