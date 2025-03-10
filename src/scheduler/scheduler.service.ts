@@ -97,7 +97,8 @@ export class SchedulerService {
       );
 
       if (email && email.email_sub_status && email.email_sub_status === EmailReason.GREY_LISTED) {
-        greyListEmails.push(email);
+        // TODO - Enable grey list soon.
+        // greyListEmails.push(email);
       }
     }
     if (greyListEmails.length) {
