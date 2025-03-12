@@ -1,3 +1,5 @@
+import { Attachment } from 'nodemailer/lib/mailer';
+
 export const LEAD_WRAP = 'Lead Wrap';
 export const MX_RECORD_CHECK_DAY_GAP = 365;
 export const SPAM_DB_CHECK_DAY_GAP = 100;
@@ -20,4 +22,15 @@ export enum MicrosoftDomains {
   OUTLOOK = 'outlook.com',
   LIVE = 'live.com',
   MSN = 'msn.com',
+}
+
+export type SendMailOptions = {
+  to: string,
+  fromEmail?: string,
+  bcc?: string[],
+  subject: string,
+  template: string,
+  context?: object,
+  attachments?: Attachment[],
+  headers?: {},
 }

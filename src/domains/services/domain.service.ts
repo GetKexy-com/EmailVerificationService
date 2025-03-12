@@ -8,7 +8,7 @@ import { PaginationQueryDto } from '@/common/dto/pagination-query.dto';
 import {
   CATCH_ALL_CHECK_DAY_GAP,
   ERROR_DOMAIN_CHECK_DAY_GAP,
-  MX_RECORD_CHECK_DAY_GAP,
+  MX_RECORD_CHECK_DAY_GAP, SendMailOptions,
   SPAM_DB_CHECK_DAY_GAP,
 } from '@/common/utility/constant';
 import { DNSBL } from '@/common/utility/dnsbl';
@@ -18,7 +18,6 @@ import {
   EmailStatus,
   EmailStatusType,
   EmailValidationResponseType,
-  SendMailOptions,
 } from '@/common/utility/email-status-type';
 import freeEmailProviderList from '@/common/utility/free-email-provider-list';
 import { DisposableDomainsService } from '@/disposable-domains/disposable-domains.service';

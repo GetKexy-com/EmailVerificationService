@@ -10,14 +10,13 @@ import {
   PROCESS_BULK_FILE_QUEUE,
   PROCESS_EMAIL_SEND_QUEUE,
   PROCESS_GREY_LIST_QUEUE,
-  QUEUE,
+  QUEUE, SendMailOptions,
 } from '@/common/utility/constant';
 import {
   EmailReason,
   EmailStatus,
   EmailStatusType,
   EmailValidationResponseType,
-  SendMailOptions,
 } from '@/common/utility/email-status-type';
 import { Domain, MXRecord } from '@/domains/entities/domain.entity';
 import { DomainService } from '@/domains/services/domain.service';

@@ -10,12 +10,11 @@ import { BulkFileEmail } from '@/bulk-file-emails/entities/bulk-file-email.entit
 import { BulkFilesService } from '@/bulk-files/bulk-files.service';
 import { UpdateBulkFileDto } from '@/bulk-files/dto/update-bulk-file.dto';
 import { BulkFile, BulkFileStatus } from '@/bulk-files/entities/bulk-file.entity';
-import { DEV, MicrosoftDomains } from '@/common/utility/constant';
+import { DEV, MicrosoftDomains, SendMailOptions } from '@/common/utility/constant';
 import {
   EmailReason,
   EmailStatus,
   EmailValidationResponseType,
-  SendMailOptions,
 } from '@/common/utility/email-status-type';
 import freeEmailProviderList from '@/common/utility/free-email-provider-list';
 import { MXRecord } from '@/domains/entities/domain.entity';

@@ -4,8 +4,7 @@ import * as process from 'node:process';
 import * as hbs from 'nodemailer-express-handlebars';
 import { ConfigService } from '@nestjs/config';
 import { randomStringGenerator } from '@nestjs/common/utils/random-string-generator.util';
-import { SendMailOptions } from '@/common/utility/email-status-type';
-import { DEV } from '@/common/utility/constant';
+import { DEV, SendMailOptions } from '@/common/utility/constant';
 
 @Injectable()
 export class MailerService {

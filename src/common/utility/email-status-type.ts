@@ -13,16 +13,7 @@ export type EmailValidationResponseType = {
   retry?: RetryStatus;
 };
 
-export type SendMailOptions = {
-  to: string,
-  fromEmail?: string,
-  bcc?: string[],
-  subject: string,
-  template: string,
-  context?: object,
-  attachments?: Attachment[],
-  headers?: {},
-}
+
 
 /** Possible email verification statuses */
 export enum EmailStatus {
