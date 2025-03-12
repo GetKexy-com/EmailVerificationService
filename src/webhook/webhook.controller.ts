@@ -1,28 +1,26 @@
 import { BadRequestException, Body, Controller, Post, Req } from '@nestjs/common';
-import { WebhookService } from './webhook.service';
-import { Public } from '@/common/decorators/public.decorator';
-import { SnsNotificationDto } from '@/webhook/dto/sns-notification.dto';
-import { validate } from 'class-validator';
-import { WinstonLoggerService } from '@/logger/winston-logger.service';
 import { minutes, Throttle } from '@nestjs/throttler';
+import { validate } from 'class-validator';
+
+import { Public } from '@/common/decorators/public.decorator';
+import { WinstonLoggerService } from '@/logger/winston-logger.service';
+import { SnsNotificationDto } from '@/webhook/dto/sns-notification.dto';
+
+import { WebhookService } from './webhook.service';
 
 @Controller('webhook')
 export class WebhookController {
   constructor(
     private readonly webhookService: WebhookService,
     private readonly winstonLoggerService: WinstonLoggerService,
-  ) {
-  }
+  ) {}
 
   @Public()
   @Throttle({
     default: { limit: 50000, ttl: minutes(1), blockDuration: minutes(1) },
   })
   @Post('sns-delivery-status')
-  async receiveEmailDeliveryStatus(
-    @Req() req: any,
-    @Body() body: any,
-  ) {
+  async receiveEmailDeliveryStatus(@Req() req: any, @Body() body: any) {
     if (!req.secure) {
       throw new BadRequestException('HTTPS required');
     }

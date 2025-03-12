@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import Bottleneck from 'bottleneck';
 import { Attachment } from 'nodemailer/lib/mailer';
 import * as path from 'path';
 import * as process from 'process';

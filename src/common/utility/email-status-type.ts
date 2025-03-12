@@ -1,5 +1,4 @@
 import { RetryStatus } from '@/domains/entities/processed_email.entity';
-import { Attachment } from 'nodemailer/lib/mailer';
 
 export type EmailValidationResponseType = {
   email_address: string;
@@ -12,8 +11,6 @@ export type EmailValidationResponseType = {
   domain_age_days?: number;
   retry?: RetryStatus;
 };
-
-
 
 /** Possible email verification statuses */
 export enum EmailStatus {

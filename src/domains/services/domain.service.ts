@@ -599,7 +599,7 @@ export class DomainService {
       fromEmail: this.configService.get<string>('VERIFY_PLUS_FROM_EMAIL'),
       to: email,
       headers: {
-        // This header allow us tracking email delivery status.
+        // This AWS config name 'Default' as header allow us tracking email delivery status.
         'X-SES-CONFIGURATION-SET': 'Default',
       },
       subject: '',

@@ -1,19 +1,17 @@
 import { Injectable } from '@nestjs/common';
-import { SnsNotificationDto } from '@/webhook/dto/sns-notification.dto';
-import { DomainService } from '@/domains/services/domain.service';
+
 import {
   EmailReason,
   EmailStatus,
   EmailValidationResponseType,
 } from '@/common/utility/email-status-type';
 import { RetryStatus } from '@/domains/entities/processed_email.entity';
+import { DomainService } from '@/domains/services/domain.service';
+import { SnsNotificationDto } from '@/webhook/dto/sns-notification.dto';
 
 @Injectable()
 export class WebhookService {
-  constructor(
-    private domainService: DomainService,
-  ) {
-  }
+  constructor(private domainService: DomainService) {}
 
   public async handleSnsNotification(notification: SnsNotificationDto) {
     let email: string = '';
@@ -23,7 +21,7 @@ export class WebhookService {
         break;
       case 'Delivery':
         email = notification.delivery.recipients[0];
-        if(notification.delivery.smtpResponse.includes('queued')) {
+        if (notification.delivery.smtpResponse.includes('queued')) {
           return notification.delivery;
         }
         emailStatus = {
@@ -62,7 +60,6 @@ export class WebhookService {
         break;
       case 'Complaint':
         break;
-
     }
 
     return { status: 'Notification Processed' };
