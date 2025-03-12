@@ -172,7 +172,7 @@ export class SmtpConnectionService {
   private async sendCommand(command: string, email = ''): Promise<string> {
     // Before sending a new command, try to remove previous command listeners to
     // avoid getting old stream response in socket.on('data')
-    // this.socket.removeAllListeners();
+    this.socket.removeAllListeners();
     let timeout: NodeJS.Timeout;
     // Track command start time to detect calculate server response time.
     const startTime = Date.now();
@@ -193,7 +193,7 @@ export class SmtpConnectionService {
             console.error('Socket write error:', err);
             reject(err);
           }
-          console.debug(`➡ Sent: ${command}`);
+          // console.debug(`➡ Sent: ${command}`);
         });
 
         let responseData = '';
@@ -201,7 +201,7 @@ export class SmtpConnectionService {
         this.socket.on('data', (chunk) => {
           const responseTime = Date.now() - startTime;
           responseData = chunk.toString();
-          console.debug(`⬅ Received: ${responseData}`);
+          // console.debug(`⬅ Received: ${responseData}`);
 
           // Detect if mail server is slow or not.
           if (command.includes('EHLO') && responseTime > SMTP_RESPONSE_MAX_DELAY) {
@@ -329,7 +329,8 @@ export class SmtpConnectionService {
   }
 
   async verifyBulkEmail(bulkFileEmails: BulkFileEmail[]): Promise<EmailValidationResponseType[]> {
-    const mailFrom = 'tanimpathan98@gmail.com';
+    // TODO - Must use an email address that belongs to the domain DNS SPF records where the domain is hosted
+    const mailFrom = 'fwork03@gmail.com';
     const emailStatuses: EmailValidationResponseType[] = [];
 
     try {
@@ -347,7 +348,6 @@ export class SmtpConnectionService {
       try {
         const responseRcptTo = await this.sendCommand(`RCPT TO:<${email}>`, email);
         const emailStatus: EmailStatusType = this.parseSmtpResponseData(responseRcptTo, email);
-        console.log({ emailStatus });
         emailStatuses.push({
           email_address: email,
           account,
@@ -382,7 +382,6 @@ export class SmtpConnectionService {
             reason: e.toString(),
           };
         }
-        console.log({ errorStatus });
         emailStatuses.push({
           email_address: email,
           account,
@@ -393,7 +392,6 @@ export class SmtpConnectionService {
       }
     }
 
-    console.log(emailStatuses);
     this.socket.write(`QUIT\r\n`);
     return emailStatuses;
   }

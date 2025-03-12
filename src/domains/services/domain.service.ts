@@ -394,34 +394,7 @@ export class DomainService {
     return emailStatuses;
   }
 
-  async smtpValidation(email: string, user: User, bulkFileId = null) {
-    let emailStatus: EmailValidationResponseType = {
-      email_address: email,
-      verify_plus: false,
-    };
-
-    // Check if we processed the email within allowed time/day and emails is
-    // VALID || CATCH_ALL || SPAMTRAP || DO_NOT_MAIL.
-    // If so, return the previous cached result.
-    // Otherwise, re-run the validation again
-    const processedEmail: ProcessedEmail = await this.getCachedProcessedEmail(email);
-    if (processedEmail) {
-      // Delete these property so these are not included in the final response.
-      delete processedEmail.id;
-      delete processedEmail.user_id;
-      delete processedEmail.bulk_file_id;
-      delete processedEmail.created_at;
-      delete processedEmail.retry;
-      emailStatus = { ...emailStatus, ...processedEmail };
-      // console.log(`${email}`, { processedEmail });
-      return emailStatus;
-    }
-
-    const [account, domain] = email.split('@');
-    // Get domain part from the email address
-    emailStatus.account = account;
-    emailStatus.domain = domain;
-
+  async domainValidation(email: string, domain: string) {
     try {
       // Step - 1 : Check email syntax validity
       await this.validateEmailFormat(email);
@@ -443,7 +416,7 @@ export class DomainService {
       // domain typo check and
       // catch-all domain check.
       const isFreeEmailDomain = freeEmailProviderList.includes(domain);
-      emailStatus.free_email = isFreeEmailDomain;
+      // emailStatus.free_email = isFreeEmailDomain;
       if (!isFreeEmailDomain) {
         // Step - 2 : Check email is role based
         // Ex - contact@domain.com
@@ -469,9 +442,6 @@ export class DomainService {
       // Step 7 : Get the MX records of the domain
       const allMxRecordHost: MXRecord[] = await this.checkDomainMxRecords(domain, dbDomain);
 
-      // Get the 0 index mxHost as it has the highest priority.
-      // We sort the MX records by their priority in ASC order
-      const mxRecordHost = allMxRecordHost[0].exchange;
       // Save The domain if it is not already saved
       if (!dbDomain) {
         const createDomainDto: CreateDomainDto = {
@@ -482,31 +452,87 @@ export class DomainService {
         };
         await this.create(createDomainDto);
       }
+      return allMxRecordHost;
+    } catch (e) {
+      const error = new Error('');
+      (error as any).data = e;
+      throw error;
+    }
+  }
 
-      // Step 9 : Make a SMTP Handshake to very if the email address exist in the mail server
+  async singleEmailValidate(email: string, user: User) {
+    const emailStatus: EmailValidationResponseType = {
+      email_address: email,
+      verify_plus: false,
+    };
+    const [account, domain] = email.split('@');
+    // Get domain part from the email address
+    emailStatus.account = account;
+    emailStatus.domain = domain;
+
+    try {
+      const allMXRecords: MXRecord[] = await this.domainValidation(email, domain);
+      // Get the 0 index mxHost as it has the highest priority.
+      // We sort the MX records by their priority in ASC order
+      const mxRecordHost = allMXRecords[0].exchange;
+
+      return await this.smtpValidation(email, user, null, mxRecordHost);
+    } catch (error) {
+      // We pass error object as string in domainValidation(). To handle that error here,
+      // we have to parse it.
+      if ((error as any).data) {
+        error = (error as any).data;
+      }
+      console.log({ error });
+      emailStatus.email_status = error['status'];
+      emailStatus.email_sub_status = error['reason'];
+      emailStatus.free_email = freeEmailProviderList.includes(emailStatus.domain);
+      await this.saveProcessedErrorEmail(emailStatus, error, email, user, null);
+
+      return emailStatus;
+    }
+  }
+
+  async smtpValidation(email: string, user: User, bulkFileId = null, mxRecordHost) {
+    let emailStatus: EmailValidationResponseType = {
+      email_address: email,
+      verify_plus: false,
+    };
+
+    // Check if we processed the email within allowed time/day and emails is
+    // VALID || CATCH_ALL || SPAMTRAP || DO_NOT_MAIL.
+    // If so, return the previous cached result.
+    // Otherwise, re-run the validation again
+    const processedEmail: ProcessedEmail = await this.getCachedProcessedEmail(email);
+    if (processedEmail) {
+      // Delete these property so these are not included in the final response.
+      delete processedEmail.id;
+      delete processedEmail.user_id;
+      delete processedEmail.bulk_file_id;
+      delete processedEmail.created_at;
+      delete processedEmail.retry;
+      emailStatus = { ...emailStatus, ...processedEmail };
+      return emailStatus;
+    }
+
+    const [account, domain] = email.split('@');
+    // Get domain part from the email address
+    emailStatus.account = account;
+    emailStatus.domain = domain;
+
+    try {
+      // Make a SMTP Handshake to very if the email address exist in the mail server
       // If email exist then we can confirm the email is valid
-      // const smtpResponse: EmailStatusType = await this.verifySmtp(
-      //   email,
-      //   mxRecordHost,
-      // );
-      console.log({ email });
-      let smtpService: SmtpConnectionService;
-      let smtpConnectionStatus: EmailStatusType;
-      // try {
-      smtpService = new SmtpConnectionService(this.winstonLoggerService);
-      smtpConnectionStatus = await smtpService.connect(mxRecordHost);
-      // } catch (e) {
-      // e - is type of 'EmailStatusType' as we reject with
-      // this type from SmtpConnectionService connect().
-      // That's how we know we can assign 'e' to 'smtpConnectionStatus'
-      // smtpConnectionStatus = e;
-      // }
+      const smtpService: SmtpConnectionService = new SmtpConnectionService(
+        this.winstonLoggerService,
+      );
+      const smtpConnectionStatus: EmailStatusType = await smtpService.connect(mxRecordHost);
       // When 'SMTP_TIMEOUT', we resolve it to process here. Otherwise,
       // rejection occur, and it goes to catch block
       // If - User enabled verify+ and smtp response
       // is a 'timeout' then we must trigger Verify+
       if (smtpConnectionStatus.reason === EmailReason.SMTP_TIMEOUT) {
-        emailStatus = await this.__processVerifyPlus(
+        emailStatus = await this.__parseSmtpResponseAndGetEmailStatus(
           email,
           user,
           smtpConnectionStatus,
@@ -514,10 +540,15 @@ export class DomainService {
         );
       } else {
         const smtpResponse: EmailStatusType = await smtpService.verifyEmail(email);
-        emailStatus = await this.__processVerifyPlus(email, user, smtpResponse, emailStatus);
+        emailStatus = await this.__parseSmtpResponseAndGetEmailStatus(
+          email,
+          user,
+          smtpResponse,
+          emailStatus,
+        );
       }
 
-      // Step - 6 : Check domain whois database to make sure everything is in good shape
+      // Check domain whois database to make sure everything is in good shape
       if (emailStatus.email_sub_status !== EmailReason.GREY_LISTED) {
         // const domainInfo: any = await this.getDomainAge(domain, dbDomain);
         // dbDomain.domain_age_days = domainInfo.domain_age_days;
@@ -528,10 +559,12 @@ export class DomainService {
       } else {
         emailStatus.retry = RetryStatus.PENDING;
       }
+      emailStatus.free_email = freeEmailProviderList.includes(emailStatus.domain);
       await this.saveProcessedEmail(emailStatus, user, bulkFileId);
       // If everything goes well, then return the emailStatus
       return emailStatus;
     } catch (error) {
+      console.log({ error });
       emailStatus.email_status = error['status'];
       emailStatus.email_sub_status = error['reason'];
       emailStatus.free_email = freeEmailProviderList.includes(emailStatus.domain);
@@ -541,7 +574,7 @@ export class DomainService {
     }
   }
 
-  private async __processVerifyPlus(
+  private async __parseSmtpResponseAndGetEmailStatus(
     email: string,
     user: User,
     smtpResponse: EmailStatusType,

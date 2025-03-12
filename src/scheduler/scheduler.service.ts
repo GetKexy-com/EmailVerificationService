@@ -17,6 +17,8 @@ import {
   EmailValidationResponseType,
   SendMailOptions,
 } from '@/common/utility/email-status-type';
+import freeEmailProviderList from '@/common/utility/free-email-provider-list';
+import { MXRecord } from '@/domains/entities/domain.entity';
 import { ProcessedEmail } from '@/domains/entities/processed_email.entity';
 import { DomainService } from '@/domains/services/domain.service';
 import { WinstonLoggerService } from '@/logger/winston-logger.service';
@@ -33,10 +35,11 @@ export class SchedulerService {
     private userService: UsersService,
     private queueService: QueueService,
     private winstonLoggerService: WinstonLoggerService,
-  ) {}
+  ) {
+  }
 
   @Cron(CronExpression.EVERY_MINUTE)
-  public async runFileEmailValidation() {
+  public async runBulkFileEmailValidation() {
     const pendingFiles: BulkFile[] = await this.bulkFilesService.getPendingBulkFile();
     console.log({ pendingFiles });
     if (!pendingFiles.length) {
@@ -97,7 +100,7 @@ export class SchedulerService {
       );
 
       if (email && email.email_sub_status && email.email_sub_status === EmailReason.GREY_LISTED) {
-        // TODO - Enable grey list soon.
+        // TODO - GREY LIST check is disabled. Enable when it is updated to handle batch email
         // greyListEmails.push(email);
       }
     }
@@ -195,7 +198,7 @@ export class SchedulerService {
       template: 'email_verification_complete',
       context: emailDynamicData,
       attachments,
-      bcc: ['arahimdu50@gmail.com'],
+      bcc: [],
     };
     await this.queueService.addEmailToQueue(emailData);
   }
@@ -314,20 +317,14 @@ export class SchedulerService {
       throw new Error('No file path provided');
     }
 
-    let batchSize = 50;
-    let delayBetweenBatches = 6 * 1000;
-    let limiter = new Bottleneck({
-      maxConcurrent: 1, // Adjust based on your testing
-      minTime: 300, // 300ms delay between requests (adjustable)
-    });
+    let batchSize = 5;
+    let delayBetweenBatches = 60 * 1000;
     const results: EmailValidationResponseType[] = [];
 
     try {
       const bulkFileEmails: BulkFileEmail[] = await this.bulkFileEmailsService.findBulkFileEmails(
         bulkFile.id,
       );
-      const googleEmails: BulkFileEmail[] = [];
-      const googleMxRecord = 'aspmx.l.google.com';
       const hotmailEmails: BulkFileEmail[] = [];
       const hotmailMxRecord = 'hotmail-com.olc.protection.outlook.com';
       const liveEmails: BulkFileEmail[] = [];
@@ -338,21 +335,45 @@ export class SchedulerService {
       const outlookMxRecord = 'outlook-com.olc.protection.outlook.com';
       const outlookBusinessDomainEmails: BulkFileEmail[] = [];
       const otherEmails: BulkFileEmail[] = [];
+      let mxRecord: MXRecord;
       for (const bulkFileEmail of bulkFileEmails) {
         const [account, domain] = bulkFileEmail.email_address.split('@');
-        let mxRecords = [];
         try {
-          mxRecords = await this.domainService.checkDomainMxRecords(domain, null);
-        } catch (e) {
-          results.push({
+          const mxRecords: MXRecord[] = await this.domainService.domainValidation(
+            bulkFileEmail.email_address,
+            domain,
+          );
+          mxRecord = mxRecords[0];
+        } catch (error) {
+          // We pass error object as string in domainValidation(). To handle that error here,
+          // we have to parse it.
+          if ((error as any).data) {
+            error = (error as any).data;
+          }
+          // If domainValidation() throws error then, this email error is not saved in DB yet.
+          // We need to save it here.
+          const emailStatus: EmailValidationResponseType = {
             email_address: bulkFileEmail.email_address,
-            ...e,
-          });
+            verify_plus: false,
+            domain,
+            account,
+          };
+          emailStatus.email_status = error['status'];
+          emailStatus.email_sub_status = error['reason'];
+          emailStatus.free_email = freeEmailProviderList.includes(emailStatus.domain);
+          await this.domainService.saveProcessedErrorEmail(
+            emailStatus,
+            error,
+            bulkFileEmail.email_address,
+            user,
+            null,
+          );
+          results.push(emailStatus);
           continue;
         }
         // If MX record includes 'outlook.com' it means mail server is outlook.
-        // We split Outlook emails into few categories process them differently.
-        if (mxRecords[0].exchange.includes(MicrosoftDomains.OUTLOOK)) {
+        // We split Outlook emails into few categories to process them differently.
+        if (mxRecord.exchange.includes(MicrosoftDomains.OUTLOOK)) {
           if (domain === MicrosoftDomains.HOTMAIL) {
             hotmailEmails.push(bulkFileEmail);
           } else if (domain === MicrosoftDomains.OUTLOOK) {
@@ -364,8 +385,6 @@ export class SchedulerService {
           } else {
             outlookBusinessDomainEmails.push(bulkFileEmail);
           }
-        } else if (mxRecords[0].exchange.includes(googleMxRecord)) {
-          googleEmails.push(bulkFileEmail);
         } else {
           otherEmails.push(bulkFileEmail);
         }
@@ -422,23 +441,7 @@ export class SchedulerService {
       }
 
       batchSize = 10;
-      limiter = new Bottleneck({
-        maxConcurrent: 1,
-        minTime: 300,
-      });
       delayBetweenBatches = 10 * 1000;
-      const googleEmailResults: EmailValidationResponseType[] =
-        await this.__processMultipleRCPTBatch(
-          batchSize,
-          googleEmails,
-          delayBetweenBatches,
-          googleMxRecord,
-          user,
-          bulkFile,
-        );
-      if (googleEmailResults.length) {
-        results.push(...googleEmailResults);
-      }
 
       // Split emails into batches
       const nonOutlookEmailBatches = this.__createBatchOfSize(batchSize, otherEmails);
@@ -446,21 +449,19 @@ export class SchedulerService {
       for (const batch of nonOutlookEmailBatches) {
         const result: EmailValidationResponseType[] = await this.__processSingleRCPTBatchValidation(
           batch,
-          limiter,
           user,
           bulkFile,
+          mxRecord.exchange,
         );
         if (result.length) {
           results.push(...result);
         }
+
         await this.__delay(delayBetweenBatches);
       }
 
       // For Outlook mail server we slow the limiter to only 1 per concurrency
       // and delay between batches is 2 sec as batch size is 1 email
-      limiter = new Bottleneck({
-        maxConcurrent: 1,
-      });
       delayBetweenBatches = 12 * 1000; // So it is 5 per min
       // For Outlook, each batch should have only 1 email.
       batchSize = 1;
@@ -471,9 +472,9 @@ export class SchedulerService {
       for (const batch of outlookBusinessEmailBatches) {
         const result: EmailValidationResponseType[] = await this.__processSingleRCPTBatchValidation(
           batch,
-          limiter,
           user,
           bulkFile,
+          mxRecord.exchange,
         );
         if (result.length) {
           results.push(...result);
@@ -530,97 +531,30 @@ export class SchedulerService {
 
   private async __processSingleRCPTBatchValidation(
     batch: BulkFileEmail[],
-    limiter,
     user,
     bulkFile,
+    mxRecord,
   ): Promise<EmailValidationResponseType[]> {
     const results: EmailValidationResponseType[] = [];
-    const batchPromises = batch.map((bulkFileEmail) =>
-      limiter.schedule(async () => {
-        try {
-          console.log(`Validation started: ${bulkFileEmail.email_address}`);
-          const validationResponse: EmailValidationResponseType =
-            await this.domainService.smtpValidation(bulkFileEmail.email_address, user, bulkFile.id);
-          console.log(`Validation complete: ${validationResponse.email_address}`);
-          return validationResponse;
-        } catch (error) {
-          console.error(`Error validating ${bulkFileEmail.email_address}:`, error);
-          return null; // Capture the error instead of failing the batch
-        }
-      }),
-    );
-
-    // Wait for the batch to complete
-    const batchResults = await Promise.allSettled(batchPromises);
-    results.push(
-      ...batchResults
-        .filter((result) => result.status === 'fulfilled' && result.value !== null)
-        .map((result) => (result as PromiseFulfilledResult<any>).value),
-    );
+    for (const bulkFileEmail of batch) {
+      try {
+        console.log(`Validation started: ${bulkFileEmail.email_address}`);
+        const validationResponse: EmailValidationResponseType =
+          await this.domainService.smtpValidation(
+            bulkFileEmail.email_address,
+            user,
+            bulkFile.id,
+            mxRecord,
+          );
+        console.log(`Validation complete: ${validationResponse.email_address}`);
+        results.push(validationResponse);
+      } catch (error) {
+        console.error(`Error validating ${bulkFileEmail.email_address}:`, error);
+        return null; // Capture the error instead of failing the batch
+      }
+    }
 
     return results;
-  }
-
-  private async __oldBulkValidate(bulkFile: BulkFile, user: User): Promise<any[]> {
-    if (!bulkFile.file_path) {
-      throw new Error('No file path provided');
-    }
-    const csvHeaders = [];
-    // Bottleneck for rate limiting (CommonJS compatible)
-    const limiter = new Bottleneck({
-      maxConcurrent: 2, // Adjust based on your testing
-      minTime: 300, // 300ms delay between requests (adjustable)
-    });
-
-    try {
-      const bulkFileEmails: BulkFileEmail[] = await this.bulkFileEmailsService.findBulkFileEmails(
-        bulkFile.id,
-      );
-      // const records = await this.bulkFilesService.readCsvFile(bulkFile.file_path);
-      // console.log({ records });
-
-      // const results = [];
-      // for (const record of records) {
-      //   console.log(`Validation started: ${record.Email}`);
-      //   const validationResponse: EmailValidationResponseType = await this.domainService.smtpValidation(
-      //     record.Email,
-      //     user,
-      //     bulkFile.id,
-      //   );
-      //   // console.log(`Validation done: ${validationResponse.email_address}`);
-      //   // Add emails to GreyList check
-      //   if (
-      //     validationResponse.email_sub_status === EmailReason.GREY_LISTED
-      //   ) {
-      //     await this.queueService.addGreyListEmailToQueue(validationResponse);
-      //   }
-      //   const res = {
-      //     ...record,
-      //     ...validationResponse,
-      //   };
-      //   results.push(res);
-      // }
-      // return results;
-
-      // Validate emails in parallel
-      const validationPromises: Promise<any>[] = bulkFileEmails.map((bulkFileEmail) =>
-        limiter.schedule(async () => {
-          console.log(`Validation started: ${bulkFileEmail.email_address}`);
-          const validationResponse: EmailValidationResponseType =
-            await this.domainService.smtpValidation(bulkFileEmail.email_address, user, bulkFile.id);
-          console.log(`Complete ${validationResponse.email_address}`);
-          return validationResponse;
-        }),
-      );
-      // Wait for all validations to complete
-      const results = await Promise.allSettled(validationPromises);
-      return results
-        .filter((result) => result.status === 'fulfilled')
-        .map((result) => (result as PromiseFulfilledResult<any>).value);
-    } catch (err) {
-      console.error('Error during bulk validation:', err);
-      throw err;
-    }
   }
 
   private async __readSCsvAndMergeValidationResults(csvPath: string) {

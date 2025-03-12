@@ -30,6 +30,6 @@ export class DomainsController {
       return new UnauthorizedException('Session expired');
     }
 
-    return await this.domainService.smtpValidation(email, user);
+    return await this.domainService.singleEmailValidate(email, user);
   }
 }
